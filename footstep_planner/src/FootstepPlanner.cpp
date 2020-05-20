@@ -350,61 +350,69 @@ FootstepPlanner::run()
            ivPlannerPtr->get_initial_eps());
   int path_cost;
   ros::WallTime startTime = ros::WallTime::now();
-  try
-  {
-    ret = ivPlannerPtr->replan(ivMaxSearchTime, &solution_state_ids,
-                               &path_cost);
-  }
-  catch (const SBPL_Exception& e)
-  {
-    // ROS_ERROR("SBPL planning failed (%s)", e.what());
-    return false;
-  }
-  ivPathCost = double(path_cost) / FootstepPlannerEnvironment::cvMmScale;
 
-  bool path_is_new = pathIsNew(solution_state_ids);
-  if (ret && solution_state_ids.size() > 0)
-  {
-    if (!path_is_new)
-      ROS_WARN("Solution found by SBPL is the same as the old solution. This could indicate that replanning failed.");
-
-    ROS_INFO("Solution of size %zu found after %f s",
-             solution_state_ids.size(),
-             (ros::WallTime::now()-startTime).toSec());
-
-    if (extractPath(solution_state_ids))
+  ivPlannerPtr->set_search_mode(true);
+  double iterative_plan_duration = 0.2; // [sec]
+  while ((ros::WallTime::now()-startTime).toSec() < ivMaxSearchTime) {
+    try
     {
-      ROS_INFO("Expanded states: %i total / %i new",
-               ivPlannerEnvironmentPtr->getNumExpandedStates(),
-               ivPlannerPtr->get_n_expands());
-      ROS_INFO("Final eps: %f", ivPlannerPtr->get_final_epsilon());
-      ROS_INFO("Path cost: %f (%i)\n", ivPathCost, path_cost);
+      ret = ivPlannerPtr->replan(iterative_plan_duration, &solution_state_ids,
+                                 &path_cost);
+      ivPlannerPtr->set_search_mode(false);
+    }
+    catch (const SBPL_Exception& e)
+    {
+      // ROS_ERROR("SBPL planning failed (%s)", e.what());
+      return false;
+    }
+    ivPathCost = double(path_cost) / FootstepPlannerEnvironment::cvMmScale;
 
-      ivPlanningStatesIds = solution_state_ids;
+    bool path_is_new = pathIsNew(solution_state_ids);
+    if (ret && solution_state_ids.size() > 0)
+    {
+      if (!path_is_new)
+      {
+        // ROS_WARN("Solution found by SBPL is the same as the old solution. This could indicate that replanning failed.");
+        continue;
+      }
 
-      broadcastExpandedNodesVis();
-      broadcastRandomNodesVis();
-      broadcastFootstepPathVis();
-      broadcastPathVis();
+      ROS_INFO("Solution of size %zu found after %f s",
+               solution_state_ids.size(),
+               (ros::WallTime::now()-startTime).toSec());
 
-      return true;
+      if (extractPath(solution_state_ids))
+      {
+        ROS_INFO("Expanded states: %i total / %i new",
+                 ivPlannerEnvironmentPtr->getNumExpandedStates(),
+                 ivPlannerPtr->get_n_expands());
+        ROS_INFO("Final eps: %f", ivPlannerPtr->get_final_epsilon());
+        ROS_INFO("Path cost: %f (%i)\n", ivPathCost, path_cost);
+
+        ivPlanningStatesIds = solution_state_ids;
+
+        broadcastExpandedNodesVis();
+        broadcastRandomNodesVis();
+        broadcastFootstepPathVis();
+        broadcastPathVis();
+      }
+      else
+      {
+        ROS_ERROR("extracting path failed\n\n");
+        return false;
+      }
     }
     else
     {
-      ROS_ERROR("extracting path failed\n\n");
+      broadcastExpandedNodesVis();
+      broadcastRandomNodesVis();
+
+      ROS_ERROR("No solution found");
       return false;
     }
   }
-  else
-  {
-    broadcastExpandedNodesVis();
-    broadcastRandomNodesVis();
 
-    ROS_ERROR("No solution found");
-    return false;
-  }
+  return true;
 }
-
 
 bool
 FootstepPlanner::extractPath(const std::vector<int>& state_ids)
